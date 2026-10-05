@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "npm run build && python server.py",
+    "test": "python -m unittest discover -s tests -v"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
