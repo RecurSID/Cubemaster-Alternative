@@ -14,7 +14,8 @@ npm start
 
 Open <http://127.0.0.1:4173>. The local Python service is required for V5;
 the browser worker intentionally does not fall back to the less capable V4
-solver.
+solver. `npm start` checks the active Python first and, on Windows, can fall
+back to a `py` launcher installation that already has OR-Tools.
 
 ## Validate
 
