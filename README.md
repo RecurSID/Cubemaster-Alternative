@@ -13,9 +13,10 @@ npm start
 ```
 
 Open <http://127.0.0.1:4173>. The local Python service is required for V5;
-the browser worker intentionally does not fall back to the less capable V4
-solver. `npm start` checks the active Python first and, on Windows, can fall
-back to a `py` launcher installation that already has OR-Tools.
+it provides full CP-SAT optimization. `npm start` checks the active Python
+first and, on Windows, can fall back to a `py` launcher installation that
+already has OR-Tools. The GitHub Pages build uses a browser-native V5
+interlocking band-swap solver because Pages cannot run a Python service.
 
 ## Validate
 

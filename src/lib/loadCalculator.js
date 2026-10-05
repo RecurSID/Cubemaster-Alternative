@@ -81,6 +81,77 @@ function createLayerPacker(cartonLength, cartonWidth) {
   return pack
 }
 
+function bestBandSwapPattern(areaLength, areaWidth, cartonLength, cartonWidth) {
+  if (cartonLength === cartonWidth) return { count: 0, pattern: 'No fit' }
+
+  const orientations = [
+    [cartonLength, cartonWidth],
+    [cartonWidth, cartonLength],
+  ]
+  let best = { count: 0, pattern: 'No fit' }
+
+  // Two row bands use opposite carton orientations. At a staggered seam the
+  // bands exchange vertical order. This produces physically valid orthogonal
+  // interlocking layouts that a guillotine split cannot represent.
+  for (const [bottomLength, bottomWidth] of orientations) {
+    const [topLength, topWidth] = bottomLength === cartonLength
+      ? orientations[1]
+      : orientations[0]
+
+    for (
+      let bottomRows = 1;
+      bottomRows * bottomWidth < areaWidth;
+      bottomRows += 1
+    ) {
+      const bottomHeight = bottomRows * bottomWidth
+      const maxTopRows = Math.floor((areaWidth - bottomHeight) / topWidth)
+
+      for (let topRows = 1; topRows <= maxTopRows; topRows += 1) {
+        const topHeight = topRows * topWidth
+        const maxBottomColumns = Math.floor(areaLength / bottomLength)
+
+        for (let bottomColumns = 0; bottomColumns <= maxBottomColumns; bottomColumns += 1) {
+          const bottomEnd = bottomColumns * bottomLength
+          const minTopEnd = Math.max(0, bottomEnd - Math.max(cartonLength, cartonWidth))
+          const maxTopEnd = Math.min(areaLength, bottomEnd + Math.max(cartonLength, cartonWidth))
+          const firstTopColumns = Math.max(0, Math.floor(minTopEnd / topLength) - 1)
+          const lastTopColumns = Math.min(
+            Math.floor(areaLength / topLength),
+            Math.ceil(maxTopEnd / topLength) + 1,
+          )
+
+          for (let topColumns = firstTopColumns; topColumns <= lastTopColumns; topColumns += 1) {
+            const topEnd = topColumns * topLength
+            const seamIsValid = (
+              (bottomEnd >= topEnd && bottomHeight <= topHeight)
+              || (topEnd >= bottomEnd && topHeight <= bottomHeight)
+            )
+            if (!seamIsValid) continue
+
+            const rightBottomColumns = Math.floor((areaLength - topEnd) / bottomLength)
+            const rightTopColumns = Math.floor((areaLength - bottomEnd) / topLength)
+            const count = (
+              bottomRows * bottomColumns
+              + topRows * topColumns
+              + bottomRows * rightBottomColumns
+              + topRows * rightTopColumns
+            )
+
+            if (count > best.count) {
+              best = {
+                count,
+                pattern: `Interlocking band-swap pattern (${count} cartons)`,
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return best
+}
+
 function optimizeUprightLoad(carton, load) {
   const cartonVolume = carton.length * carton.width * carton.height
   const loadVolume = load.length * load.width * load.height
@@ -94,7 +165,16 @@ function optimizeUprightLoad(carton, load) {
     if (height > load.height) continue
 
     const layers = Math.floor(load.height / height)
-    const layer = createLayerPacker(length, width)(load.length, load.width)
+    const guillotineLayer = createLayerPacker(length, width)(load.length, load.width)
+    const interlockingLayer = bestBandSwapPattern(
+      load.length,
+      load.width,
+      length,
+      width,
+    )
+    const layer = interlockingLayer.count > guillotineLayer.count
+      ? interlockingLayer
+      : guillotineLayer
     if (!layer.count) continue
 
     const totalCartons = layer.count * layers
