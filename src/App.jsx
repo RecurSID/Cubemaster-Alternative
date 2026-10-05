@@ -159,7 +159,7 @@ function App() {
             Enter one carton's dimensions to compare pallet and container capacity.
           </p>
           <div className="orientation-note" aria-label="Calculation orientation rules">
-            <span><strong>Pallet</strong> All orientations</span>
+            <span><strong>Pallet</strong> Height stays upright</span>
             <span><strong>40HC container</strong> Height stays upright</span>
           </div>
         </div>
@@ -188,7 +188,7 @@ function App() {
           </div>
 
           <div className="form-footer">
-            <p className="form-note">40HC keeps the entered height upright.</p>
+            <p className="form-note">Pallet and 40HC keep the entered height upright.</p>
             <button type="submit" disabled={isCalculating}>
               {isCalculating ? 'Calculating…' : 'Calculate load'}
               <span aria-hidden="true">→</span>
@@ -215,14 +215,14 @@ function App() {
 
         {!isCalculating && results && (
           <div className="result-grid">
-            <ResultCard title="Local pallet" eyebrow="All orientations · 1200 × 1000 × 1600 mm usable" result={results.pallet} />
+            <ResultCard title="Local pallet" eyebrow="Height upright · 1200 × 1000 × 1600 mm usable" result={results.pallet} />
             <ResultCard title="40HC container" eyebrow="Height upright · 11998 × 2330 × 2655 mm" result={results.container} />
           </div>
         )}
       </section>
 
       <footer className="site-footer">
-        <span>All-orientation pallet &amp; upright-height 40HC container calculator.</span>
+        <span>Upright-height pallet &amp; 40HC container calculator with L/W rotation.</span>
         <span>
           Developed by{' '}
           <a href="https://github.com/RecurSID" target="_blank" rel="noreferrer">

@@ -1,24 +1,10 @@
 const PALLET = { length: 1200, width: 1000, height: 1600 }
 const CONTAINER_40HC = { length: 11998, width: 2330, height: 2655 }
 
-function uniqueOrientations(length, width, height, rotateVertically) {
-  if (!rotateVertically) {
-    return length === width
-      ? [[length, width, height]]
-      : [[length, width, height], [width, length, height]]
-  }
-
-  const values = [length, width, height]
-  const permutations = [
-    [values[0], values[1], values[2]],
-    [values[0], values[2], values[1]],
-    [values[1], values[0], values[2]],
-    [values[1], values[2], values[0]],
-    [values[2], values[0], values[1]],
-    [values[2], values[1], values[0]],
-  ]
-
-  return [...new Map(permutations.map((item) => [item.join('x'), item])).values()]
+function uprightOrientations(length, width, height) {
+  return length === width
+    ? [[length, width, height]]
+    : [[length, width, height], [width, length, height]]
 }
 
 function createLayerPacker(cartonLength, cartonWidth) {
@@ -67,7 +53,7 @@ function createLayerPacker(cartonLength, cartonWidth) {
       if (count > best.count) {
         best = {
           count,
-          pattern: `Vertical blocks: [${left.pattern}] + [${right.pattern}]`,
+          pattern: `Length blocks: [${left.pattern}] + [${right.pattern}]`,
         }
         if (count === areaLimit) break
       }
@@ -81,7 +67,7 @@ function createLayerPacker(cartonLength, cartonWidth) {
         if (count > best.count) {
           best = {
             count,
-            pattern: `Horizontal blocks: [${bottom.pattern}] + [${top.pattern}]`,
+            pattern: `Width blocks: [${bottom.pattern}] + [${top.pattern}]`,
           }
           if (count === areaLimit) break
         }
@@ -95,16 +81,15 @@ function createLayerPacker(cartonLength, cartonWidth) {
   return pack
 }
 
-function optimizeLoad(carton, load, rotateVertically) {
+function optimizeUprightLoad(carton, load) {
   const cartonVolume = carton.length * carton.width * carton.height
   const loadVolume = load.length * load.width * load.height
   let best = null
 
-  for (const [length, width, height] of uniqueOrientations(
+  for (const [length, width, height] of uprightOrientations(
     carton.length,
     carton.width,
     carton.height,
-    rotateVertically,
   )) {
     if (height > load.height) continue
 
@@ -124,7 +109,16 @@ function optimizeLoad(carton, load, rotateVertically) {
       pattern: layer.pattern,
     }
 
-    if (!best || result.totalCartons > best.totalCartons) best = result
+    if (
+      !best
+      || result.totalCartons > best.totalCartons
+      || (
+        result.totalCartons === best.totalCartons
+        && result.floorUtilization > best.floorUtilization
+      )
+    ) {
+      best = result
+    }
   }
 
   return best
@@ -132,7 +126,7 @@ function optimizeLoad(carton, load, rotateVertically) {
 
 export function calculateLoads(carton) {
   return {
-    pallet: optimizeLoad(carton, PALLET, true),
-    container: optimizeLoad(carton, CONTAINER_40HC, false),
+    pallet: optimizeUprightLoad(carton, PALLET),
+    container: optimizeUprightLoad(carton, CONTAINER_40HC),
   }
 }
