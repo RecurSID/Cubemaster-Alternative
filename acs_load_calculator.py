@@ -1,54 +1,69 @@
 """
 ACS LOCAL PALLET / 40HC LOAD CALCULATOR
-=======================================
+========================================
+V3 - CubeMaster Matching Build
 
-V2 - CubeMaster comparison build
-
-Purpose:
-    Calculate:
-    - Cartons per pallet
-    - Pallet utilization
-    - Cartons per 40HC
-    - Container utilization
-
-Current assumptions derived from ACS CubeMaster reports:
+Current inferred ACS rules:
 
 PALLET
-    Footprint: 1200 x 1000 mm
-    Pallet base height: 150 mm
-    Maximum total height: 1750 mm
-    Usable cargo height: 1600 mm
-    All carton orientations tested
+------
+Footprint          : 1200 x 1000 mm
+Pallet base        : 150 mm
+Maximum total      : 1750 mm
+Usable cargo height: 1600 mm
 
 40HC
-    Internal size: 11998 x 2330 x 2655 mm
-    Original carton HEIGHT remains vertical
-    LENGTH/WIDTH may rotate on the floor
+----
+Internal dimensions:
+11998 x 2330 x 2655 mm
 
-No external packages required.
+ORIENTATION RULE
+----------------
+For BOTH pallet and 40HC:
+
+- Entered HEIGHT remains vertical/upright.
+- LENGTH and WIDTH may swap on the floor.
+- Mixed rectangular block patterns are allowed.
+
+Example:
+530 x 340 x 180
+
+Allowed:
+530 x 340 x 180
+340 x 530 x 180
+
+Not allowed:
+340 x 180 x 530
+180 x 340 x 530
+etc.
+
+No external Python packages required.
 """
 
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import permutations
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-# Euro - Primark pallet
+# ---------------- PALLET ----------------
+
 PALLET_LENGTH = 1200
 PALLET_WIDTH = 1000
+
 PALLET_BASE_HEIGHT = 150
 PALLET_MAX_TOTAL_HEIGHT = 1750
 
 PALLET_USABLE_HEIGHT = (
-    PALLET_MAX_TOTAL_HEIGHT - PALLET_BASE_HEIGHT
+    PALLET_MAX_TOTAL_HEIGHT
+    - PALLET_BASE_HEIGHT
 )
 
 
-# 40FT High Cube - PAC-D / ACS configuration
+# ---------------- 40HC ----------------
+
 CONTAINER_LENGTH = 11998
 CONTAINER_WIDTH = 2330
 CONTAINER_HEIGHT = 2655
@@ -67,81 +82,63 @@ class Orientation:
 
 @dataclass
 class LoadResult:
+
     total_cartons: int
+
     cartons_per_layer: int
+
     layers: int
 
     carton_length: int
     carton_width: int
     carton_height: int
 
+    loaded_height: int
+
     floor_utilization: float
     volume_utilization: float
-
-    loaded_height: int
 
     pattern_description: str
 
 
 # ============================================================
-# CARTON ORIENTATIONS
+# CARTON ORIENTATION
 # ============================================================
 
-def get_all_orientations(length, width, height):
+def get_upright_orientations(
+    length,
+    width,
+    height
+):
     """
-    Generate all unique 3D orientations.
+    Height always remains vertical.
 
-    Example:
-        1000 x 400 x 120
-
-    May become:
-        1000 x 400 x 120
-        400 x 1000 x 120
-        1000 x 120 x 400
-        120 x 1000 x 400
-        400 x 120 x 1000
-        120 x 400 x 1000
-    """
-
-    unique = set(
-        permutations(
-            (length, width, height),
-            3
-        )
-    )
-
-    return [
-        Orientation(*orientation)
-        for orientation in unique
-    ]
-
-
-def get_upright_orientations(length, width, height):
-    """
-    Keep the supplied carton HEIGHT vertical.
-
-    Only LENGTH and WIDTH can rotate.
+    Only L/W rotation is allowed.
 
     Example:
 
-        1080 x 430 x 60
+    530 x 340 x 180
 
-    becomes either:
+    becomes:
 
-        1080 x 430 x 60
+    530 x 340 x 180
 
-    or:
+    OR
 
-        430 x 1080 x 60
-
-    It cannot become:
-
-        60 x 1080 x 430
+    340 x 530 x 180
     """
 
     orientations = {
-        (length, width, height),
-        (width, length, height)
+        (
+            length,
+            width,
+            height
+        ),
+        (
+            width,
+            length,
+            height
+        )
     }
 
     return [
@@ -151,50 +148,24 @@ def get_upright_orientations(length, width, height):
 
 
 # ============================================================
-# BASIC HELPERS
+# VOLUME
 # ============================================================
 
-def carton_volume(length, width, height):
-    return length * width * height
-
-
-# ============================================================
-# SIMPLE GRID PACKING
-# ============================================================
-
-def simple_grid_count(
-    area_length,
-    area_width,
-    carton_length,
-    carton_width
+def carton_volume(
+    length,
+    width,
+    height
 ):
-    """
-    Calculate cartons when all cartons have the same
-    floor orientation.
-    """
-
-    if (
-        carton_length > area_length
-        or carton_width > area_width
-    ):
-        return 0
-
-    along_length = (
-        area_length // carton_length
-    )
-
-    along_width = (
-        area_width // carton_width
-    )
 
     return (
-        along_length
-        * along_width
+        length
+        * width
+        * height
     )
 
 
 # ============================================================
-# 2D MIXED BLOCK PACKING
+# 2D BLOCK PACKING ENGINE
 # ============================================================
 
 @lru_cache(maxsize=None)
@@ -205,42 +176,57 @@ def best_2d_pack(
     carton_width
 ):
     """
-    Find a good rectangular packing pattern for ONE layer.
+    Find the best number of cartons that can fit
+    on ONE rectangular layer.
 
-    The algorithm tries:
+    The carton may rotate 90 degrees on the floor.
 
-        - Normal grid
-        - 90-degree rotated grid
-        - Vertical rectangular subdivision
-        - Horizontal rectangular subdivision
+    The algorithm tests:
 
-    This allows patterns such as:
+    - Normal rectangular grid
+    - Rotated rectangular grid
+    - Length-wise block splits
+    - Width-wise block splits
 
-        1 block
-        2 blocks
-        3 blocks
-        4+ blocks
+    This allows mixed patterns similar to:
 
-    depending on the carton/container dimensions.
+    1 block
+    2 blocks
+    3 blocks
+    4 blocks
 
     Returns:
 
-        count
-        description
+        (
+            carton_count,
+            pattern_description
+        )
     """
+
+    # --------------------------------------------------------
+    # INVALID AREA
+    # --------------------------------------------------------
 
     if (
         area_length <= 0
         or area_width <= 0
     ):
-        return 0, "empty"
+
+        return (
+            0,
+            "empty"
+        )
+
 
     best_count = 0
-    best_description = "No fit"
+
+    best_description = (
+        "No fit"
+    )
 
 
     # --------------------------------------------------------
-    # FLOOR ORIENTATIONS
+    # ALLOWED FLOOR ORIENTATIONS
     # --------------------------------------------------------
 
     floor_orientations = {
@@ -255,40 +241,46 @@ def best_2d_pack(
     }
 
 
-    # --------------------------------------------------------
-    # BASIC GRID
-    # --------------------------------------------------------
+    # ========================================================
+    # BASIC GRID TESTS
+    # ========================================================
 
     for cl, cw in floor_orientations:
 
         if (
             cl <= area_length
-            and cw <= area_width
+            and
+            cw <= area_width
         ):
 
-            nx = (
+            along_length = (
                 area_length // cl
             )
 
-            ny = (
+            along_width = (
                 area_width // cw
             )
 
-            count = nx * ny
+            count = (
+                along_length
+                * along_width
+            )
+
 
             if count > best_count:
 
                 best_count = count
 
                 best_description = (
-                    f"{nx} x {ny} grid "
+                    f"{along_length} x "
+                    f"{along_width} grid "
                     f"({cl}x{cw})"
                 )
 
 
-    # --------------------------------------------------------
-    # POSSIBLE BLOCK SPLITS
-    # --------------------------------------------------------
+    # ========================================================
+    # GENERATE USEFUL SPLIT POSITIONS
+    # ========================================================
 
     x_splits = set()
     y_splits = set()
@@ -296,37 +288,49 @@ def best_2d_pack(
 
     for cl, cw in floor_orientations:
 
-        # Possible splits along length
-        n = 1
+        # ----------------------------------------------------
+        # LENGTH SPLITS
+        # ----------------------------------------------------
 
-        while n * cl < area_length:
+        multiplier = 1
+
+        while (
+            multiplier * cl
+            < area_length
+        ):
 
             x_splits.add(
-                n * cl
+                multiplier * cl
             )
 
-            n += 1
+            multiplier += 1
 
 
-        # Possible splits along width
-        n = 1
+        # ----------------------------------------------------
+        # WIDTH SPLITS
+        # ----------------------------------------------------
 
-        while n * cw < area_width:
+        multiplier = 1
+
+        while (
+            multiplier * cw
+            < area_width
+        ):
 
             y_splits.add(
-                n * cw
+                multiplier * cw
             )
 
-            n += 1
+            multiplier += 1
 
 
-    # --------------------------------------------------------
-    # VERTICAL BLOCK SPLITS
-    # --------------------------------------------------------
+    # ========================================================
+    # LENGTH-WISE BLOCK SPLITS
+    # ========================================================
 
     for split in x_splits:
 
-        left_count, left_desc = (
+        first_count, first_desc = (
             best_2d_pack(
                 split,
                 area_width,
@@ -335,7 +339,8 @@ def best_2d_pack(
             )
         )
 
-        right_count, right_desc = (
+
+        second_count, second_desc = (
             best_2d_pack(
                 area_length - split,
                 area_width,
@@ -344,29 +349,31 @@ def best_2d_pack(
             )
         )
 
+
         total = (
-            left_count
-            + right_count
+            first_count
+            + second_count
         )
+
 
         if total > best_count:
 
             best_count = total
 
             best_description = (
-                "Vertical blocks: "
-                f"[{left_desc}] + "
-                f"[{right_desc}]"
+                "Length blocks: "
+                f"[{first_desc}] + "
+                f"[{second_desc}]"
             )
 
 
-    # --------------------------------------------------------
-    # HORIZONTAL BLOCK SPLITS
-    # --------------------------------------------------------
+    # ========================================================
+    # WIDTH-WISE BLOCK SPLITS
+    # ========================================================
 
     for split in y_splits:
 
-        bottom_count, bottom_desc = (
+        first_count, first_desc = (
             best_2d_pack(
                 area_length,
                 split,
@@ -375,7 +382,8 @@ def best_2d_pack(
             )
         )
 
-        top_count, top_desc = (
+
+        second_count, second_desc = (
             best_2d_pack(
                 area_length,
                 area_width - split,
@@ -384,19 +392,21 @@ def best_2d_pack(
             )
         )
 
+
         total = (
-            bottom_count
-            + top_count
+            first_count
+            + second_count
         )
+
 
         if total > best_count:
 
             best_count = total
 
             best_description = (
-                "Horizontal blocks: "
-                f"[{bottom_desc}] + "
-                f"[{top_desc}]"
+                "Width blocks: "
+                f"[{first_desc}] + "
+                f"[{second_desc}]"
             )
 
 
@@ -407,47 +417,30 @@ def best_2d_pack(
 
 
 # ============================================================
-# GENERAL LOAD OPTIMIZER
+# GENERAL LOAD CALCULATION
 # ============================================================
 
-def optimize_load(
+def optimize_upright_load(
     carton_l,
     carton_w,
     carton_h,
+
     load_l,
     load_w,
-    load_h,
-    allow_vertical_rotation
+    load_h
 ):
     """
-    General load optimizer.
-
-    allow_vertical_rotation=True:
-        All six 3D orientations may be tested.
-
-    allow_vertical_rotation=False:
-        Original carton HEIGHT remains vertical.
+    Optimize loading while ALWAYS keeping
+    the entered carton height upright.
     """
 
-    if allow_vertical_rotation:
-
-        orientations = (
-            get_all_orientations(
-                carton_l,
-                carton_w,
-                carton_h
-            )
+    orientations = (
+        get_upright_orientations(
+            carton_l,
+            carton_w,
+            carton_h
         )
-
-    else:
-
-        orientations = (
-            get_upright_orientations(
-                carton_l,
-                carton_w,
-                carton_h
-            )
-        )
+    )
 
 
     original_carton_volume = (
@@ -469,40 +462,48 @@ def optimize_load(
     best = None
 
 
+    # ========================================================
+    # TEST L/W FLOOR ORIENTATIONS
+    # ========================================================
+
     for orientation in orientations:
 
-        # ---------------------------------------------
-        # Check vertical fit
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # CHECK HEIGHT
+        # ----------------------------------------------------
 
         if (
             orientation.height
             > load_h
         ):
+
             continue
 
 
-        # ---------------------------------------------
-        # Number of vertical layers
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # NUMBER OF LAYERS
+        # ----------------------------------------------------
 
         layers = (
             load_h
             // orientation.height
         )
 
+
         if layers <= 0:
+
             continue
 
 
-        # ---------------------------------------------
-        # Solve one floor layer
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # SOLVE ONE LAYER
+        # ----------------------------------------------------
 
-        per_layer, description = (
+        per_layer, pattern = (
             best_2d_pack(
                 load_l,
                 load_w,
+
                 orientation.length,
                 orientation.width
             )
@@ -510,22 +511,23 @@ def optimize_load(
 
 
         if per_layer <= 0:
+
             continue
 
 
-        # ---------------------------------------------
-        # Total cartons
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # TOTAL CARTONS
+        # ----------------------------------------------------
 
-        total = (
+        total_cartons = (
             per_layer
             * layers
         )
 
 
-        # ---------------------------------------------
-        # Loaded height
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # LOADED HEIGHT
+        # ----------------------------------------------------
 
         loaded_height = (
             layers
@@ -533,14 +535,19 @@ def optimize_load(
         )
 
 
-        # ---------------------------------------------
-        # Floor utilization
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # FLOOR UTILIZATION
+        # ----------------------------------------------------
+
+        carton_floor_area = (
+            orientation.length
+            * orientation.width
+        )
+
 
         used_floor_area = (
             per_layer
-            * orientation.length
-            * orientation.width
+            * carton_floor_area
         )
 
 
@@ -557,12 +564,12 @@ def optimize_load(
         )
 
 
-        # ---------------------------------------------
-        # Volume utilization
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # VOLUME UTILIZATION
+        # ----------------------------------------------------
 
         used_volume = (
-            total
+            total_cartons
             * original_carton_volume
         )
 
@@ -574,19 +581,39 @@ def optimize_load(
         )
 
 
+        # ----------------------------------------------------
+        # CREATE RESULT
+        # ----------------------------------------------------
+
         result = LoadResult(
 
-            total_cartons=total,
+            total_cartons=(
+                total_cartons
+            ),
 
-            cartons_per_layer=per_layer,
+            cartons_per_layer=(
+                per_layer
+            ),
 
-            layers=layers,
+            layers=(
+                layers
+            ),
 
-            carton_length=orientation.length,
+            carton_length=(
+                orientation.length
+            ),
 
-            carton_width=orientation.width,
+            carton_width=(
+                orientation.width
+            ),
 
-            carton_height=orientation.height,
+            carton_height=(
+                orientation.height
+            ),
+
+            loaded_height=(
+                loaded_height
+            ),
 
             floor_utilization=(
                 floor_utilization
@@ -596,23 +623,20 @@ def optimize_load(
                 volume_utilization
             ),
 
-            loaded_height=(
-                loaded_height
-            ),
-
             pattern_description=(
-                description
+                pattern
             )
         )
 
 
-        # ---------------------------------------------
-        # Keep best result
-        # ---------------------------------------------
+        # ----------------------------------------------------
+        # SELECT BEST
+        # ----------------------------------------------------
 
         if best is None:
 
             best = result
+
 
         elif (
             result.total_cartons
@@ -621,12 +645,13 @@ def optimize_load(
 
             best = result
 
+
         elif (
             result.total_cartons
             == best.total_cartons
             and
-            result.volume_utilization
-            > best.volume_utilization
+            result.floor_utilization
+            > best.floor_utilization
         ):
 
             best = result
@@ -636,7 +661,7 @@ def optimize_load(
 
 
 # ============================================================
-# PALLET
+# PALLET CALCULATION
 # ============================================================
 
 def calculate_pallet(
@@ -645,16 +670,21 @@ def calculate_pallet(
     height
 ):
     """
-    Pallet calculation.
+    Euro - Primark pallet.
 
-    Currently tests all carton orientations because
-    this matches the CubeMaster pallet behaviour seen
-    in the supplied ACS examples.
+    1200 x 1000 mm
+
+    Maximum cargo height:
+    1600 mm above pallet.
+
+    IMPORTANT:
+    Entered carton HEIGHT stays upright.
     """
 
     best_2d_pack.cache_clear()
 
-    return optimize_load(
+
+    return optimize_upright_load(
 
         length,
         width,
@@ -662,14 +692,12 @@ def calculate_pallet(
 
         PALLET_LENGTH,
         PALLET_WIDTH,
-        PALLET_USABLE_HEIGHT,
-
-        allow_vertical_rotation=True
+        PALLET_USABLE_HEIGHT
     )
 
 
 # ============================================================
-# 40HC
+# 40HC CALCULATION
 # ============================================================
 
 def calculate_40hc(
@@ -678,22 +706,18 @@ def calculate_40hc(
     height
 ):
     """
-    40HC calculation.
+    ACS / PAC-D 40FT High Cube.
+
+    11998 x 2330 x 2655 mm
 
     IMPORTANT:
-
-    Supplied carton HEIGHT remains vertical.
-
-    LENGTH and WIDTH may rotate on the container floor.
-
-    This prevents mathematically valid but operationally
-    different orientations such as turning a 60 mm-high
-    carton onto its 430 mm side.
+    Entered carton HEIGHT stays upright.
     """
 
     best_2d_pack.cache_clear()
 
-    return optimize_load(
+
+    return optimize_upright_load(
 
         length,
         width,
@@ -701,14 +725,12 @@ def calculate_40hc(
 
         CONTAINER_LENGTH,
         CONTAINER_WIDTH,
-        CONTAINER_HEIGHT,
-
-        allow_vertical_rotation=False
+        CONTAINER_HEIGHT
     )
 
 
 # ============================================================
-# RESULT PRINTING
+# RESULT OUTPUT
 # ============================================================
 
 def print_result(
@@ -717,9 +739,18 @@ def print_result(
 ):
 
     print()
-    print("=" * 70)
-    print(title)
-    print("=" * 70)
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        title
+    )
+
+    print(
+        "=" * 70
+    )
 
 
     if result is None:
@@ -750,7 +781,7 @@ def print_result(
 
 
     print(
-        "Selected Orientation  : "
+        f"Orientation           : "
         f"{result.carton_length} x "
         f"{result.carton_width} x "
         f"{result.carton_height} mm"
@@ -785,7 +816,9 @@ def print_result(
 # INPUT VALIDATION
 # ============================================================
 
-def read_dimension(name):
+def read_dimension(
+    name
+):
 
     while True:
 
@@ -793,7 +826,8 @@ def read_dimension(name):
 
             value = int(
                 input(
-                    f"Enter carton {name} (mm): "
+                    f"Enter carton "
+                    f"{name} (mm): "
                 )
             )
 
@@ -801,7 +835,8 @@ def read_dimension(name):
             if value <= 0:
 
                 print(
-                    "Dimension must be greater than 0."
+                    "Dimension must be "
+                    "greater than 0."
                 )
 
                 continue
@@ -813,12 +848,13 @@ def read_dimension(name):
         except ValueError:
 
             print(
-                "Please enter a valid whole number."
+                "Please enter a valid "
+                "whole number."
             )
 
 
 # ============================================================
-# MAIN PROGRAM
+# MAIN
 # ============================================================
 
 def main():
@@ -840,11 +876,21 @@ def main():
     print()
 
     print(
-        "Pallet : all orientations enabled"
+        "CubeMaster matching mode"
+    )
+
+    print()
+
+    print(
+        "Pallet : entered height stays upright"
     )
 
     print(
-        "40HC   : carton height remains vertical"
+        "40HC   : entered height stays upright"
+    )
+
+    print(
+        "L/W    : 90-degree floor rotation enabled"
     )
 
     print()
@@ -852,20 +898,28 @@ def main():
 
     while True:
 
-        # ----------------------------------------------------
+        # ====================================================
         # INPUT
-        # ----------------------------------------------------
+        # ====================================================
 
-        length = read_dimension(
-            "LENGTH"
+        length = (
+            read_dimension(
+                "LENGTH"
+            )
         )
 
-        width = read_dimension(
-            "WIDTH"
+
+        width = (
+            read_dimension(
+                "WIDTH"
+            )
         )
 
-        height = read_dimension(
-            "HEIGHT"
+
+        height = (
+            read_dimension(
+                "HEIGHT"
+            )
         )
 
 
@@ -879,9 +933,9 @@ def main():
         )
 
 
-        # ----------------------------------------------------
-        # PALLET
-        # ----------------------------------------------------
+        # ====================================================
+        # CALCULATE PALLET
+        # ====================================================
 
         pallet_result = (
             calculate_pallet(
@@ -892,9 +946,9 @@ def main():
         )
 
 
-        # ----------------------------------------------------
-        # CONTAINER
-        # ----------------------------------------------------
+        # ====================================================
+        # CALCULATE CONTAINER
+        # ====================================================
 
         container_result = (
             calculate_40hc(
@@ -905,9 +959,9 @@ def main():
         )
 
 
-        # ----------------------------------------------------
-        # OUTPUT
-        # ----------------------------------------------------
+        # ====================================================
+        # DISPLAY
+        # ====================================================
 
         print_result(
             "PALLET RESULT",
@@ -928,12 +982,13 @@ def main():
         )
 
 
-        # ----------------------------------------------------
-        # AGAIN?
-        # ----------------------------------------------------
+        # ====================================================
+        # ANOTHER CALCULATION?
+        # ====================================================
 
         again = input(
-            "Calculate another carton? (Y/N): "
+            "Calculate another carton? "
+            "(Y/N): "
         ).strip().lower()
 
 
@@ -949,13 +1004,14 @@ def main():
 
 
     print()
+
     print(
         "Calculator closed."
     )
 
 
 # ============================================================
-# START
+# START APPLICATION
 # ============================================================
 
 if __name__ == "__main__":
