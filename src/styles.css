@@ -28,16 +28,24 @@ body {
     #06111f;
 }
 
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
 button,
 input {
   font: inherit;
 }
 
 .app-shell {
+  display: flex;
+  flex-direction: column;
   width: min(1180px, calc(100% - 40px));
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
-  padding-bottom: 72px;
+  padding-bottom: 18px;
 }
 
 .hero {
@@ -220,6 +228,7 @@ button:disabled {
 }
 
 .results {
+  flex: 1 0 auto;
   min-height: 260px;
   padding-top: 32px;
   border-top: 1px solid #19304a;
@@ -391,9 +400,11 @@ button:disabled {
 
 .site-footer {
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   gap: 18px;
-  padding: 24px 0 0;
+  margin-top: auto;
+  padding: 16px 0 0;
   color: #58728c;
   font-size: 11px;
   line-height: 1.6;
